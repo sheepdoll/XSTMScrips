@@ -1,0 +1,736 @@
+%!PS
+% (c) 2017 Sheepdoll (Julie S Porter)
+
+%  This script is free software; you can redistribute it and/or
+%  modify it under the terms of the GNU Lesser General Public
+%  License as published by the Free Software Foundation; either
+%  version 2.1 of the License, or (at your option) any later version.
+%
+%  This script is distributed in the hope that it will be useful,
+%  but WITHOUT ANY WARRANTY; without even the implied warranty of
+%  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+%  See the GNU Lesser General Public License for more details.
+%
+%  You should have received a copy of the GNU Lesser General Public
+%  License along with this library; if not, write to the Free Software
+%  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ 
+
+% extract IO configurator data and create a makefile from a STM CubeMX project.
+
+% more information can be found at http://stm32duino.com
+
+% to use install Ghostscript 
+
+% on OSX this is installed using mac ports also install
+% an X window shell such as XQuartz.
+
+% for Windows GhostView can be installed along with Ghostscript
+% it is best to set a command line window to run the interpreter
+% from as this code does not create graphics output.
+
+% for other unix systems use apt-get to install Ghostscript
+% there may be additional steps required to open an XTerm
+% which is not needed for this script
+
+% windows command line users will need to work out how to 
+% set the correct interpreter paths externally before
+% launching Ghostscript
+
+% this script must be in the same folder (path) as the .ioc file
+% on unix use cp to add or drag this script into the directory
+
+% interpreter must be run from the same directory path.
+% on Unix systems use cd and verify with PWD  this scrpt
+% defaults the path being the same as the .ioc file
+
+
+% Once the interpreter us active at the Ghostscript GS> prompt type
+%(xstm) run
+
+
+% default is to write the makefile script to the backchannel
+% this uses color highlighting to make the comments green. 
+% optionally the makefile can be written to a logfile (not fully tested.)
+
+% user definable options
+
+% change this path to your .ioc file 
+/tfn (MXNucleoF103.ioc) def 
+
+% this path points to the project file CUBE uses to generate a project
+% osx hides files that start with a (.) dot
+/tfm (.mxproject) def 
+
+% set this flag to true to create the makefile in the current directory.
+/writeLog false def
+
+% this is the path to the makefile
+/LogFilePath (makefile) def 
+
+% no user options below this point
+%------------------------------------------------------------------------
+
+
+/=$ {dup length 2 mul dup 60 idiv add 1 add string dup 
+/ASCIIHexEncode filter 3 -1 roll 3 copy writestring 2 
+index flushfile pop pop  closefile =} bind def
+
+/$ {dup length 2 mul dup 60 idiv add 1 add string dup 
+/ASCIIHexEncode filter 3 -1 roll 3 copy writestring 2 
+index flushfile pop pop  closefile } bind def
+
+/dfa {( << %>) = { (\t/) print exch =string cvs print ( ) print ==} forall (>> def) =} bind def
+
+/makestring { 
+	%verbose 2 gt {(<) print =$} if
+	dup length string       % new string of right size
+	dup /NullEncode filter      % make a file out of string
+	2 index                 % array to stack top
+    { 2 copy write pop }         % integers to string
+	forall
+    flushfile exch pop                   % clean up
+} bind def
+
+/strcat {
+	dup length 2 index length add string
+	2 index length 3 -1 roll 3 copy putinterval pop pop 
+	0 3 -1 roll 3 copy putinterval pop pop 
+
+} bind def
+
+
+/Word_l$ <870000> def			% low first
+/Long_l$ <8500000000> def		% low first
+
+/Word$ <860000> def			% high first
+/Long$ <8400000000> def		% high first
+
+/writedict << % >
+/lp 0  %= linbfr;
+/linbfr [ 300 {32} repeat ] makestring 
+/blnkbfr [ 300 {32} repeat ] makestring 
+>> def
+
+/writef {
+	writeLog {
+		lf exch writestring
+	}{
+		writedict begin
+		/wrkstr exch def
+		linbfr lp wrkstr putinterval
+		/lp lp wrkstr length add def
+		% flush the buffer when overflow is imminent
+		lp 200 gt {wrtlin} if
+
+		end
+	}ifelse
+} bind def
+
+/writem {
+		writedict begin
+		/wrkstr exch def
+		linbfr lp wrkstr putinterval
+		/lp lp wrkstr length add def
+		% flush the buffer when overflow is imminent
+		lp 200 gt {wrtlin} if
+
+	end
+} bind def
+
+
+/wrtlin {
+	writeLog {
+		lf <0D0A> writestring lf flushfile
+	}{
+		writedict begin
+		linbfr lp 16#0D put /lp lp 1 add def
+		linbfr lp 16#0A put /lp lp 1 add def
+		linbfr 0 lp getinterval
+		print flush
+		/lp 0 def
+		linbfr 0 blnkbfr putinterval
+		end
+	}ifelse
+} bind def
+
+/wrtNum {
+	writeLog {
+		lf exch write 
+	}{
+		pHex writef
+	}ifelse
+} bind def 
+
+/wrtpos 
+{
+	writedict begin
+
+	/pos exch def
+	/curpos lp def %linbfr sub def
+	{
+		curpos pos lt {
+			%linbfr curpos 32 put
+			/curpos curpos 1 add def
+			/lp lp 1 add def
+		}{
+			exit
+		}ifelse
+	} loop  
+	end
+} bind def
+
+/project 10 dict def
+
+/asmlist [] def
+/hdrlist [] def
+
+/ifil tfn (r) file def
+/eof false def
+{
+
+	ifil 400 string readline {}{/eof true def} ifelse
+	dup length 0 gt {
+	dup 0 get 35 eq {
+		(\033[0;32m) print 
+		print
+		(\033[0m) = 
+	}{
+		(.) search {
+			cvn project exch 2 copy known {
+				get begin
+			}{
+%(% new dict ) print dup ==
+				10 dict begin
+				currentdict put
+			}ifelse
+			pop %the dot
+			(=) search {
+				exch pop % the assignment
+				cvn exch
+				(,) search {
+					exch pop
+					mark 3 1 roll
+					exch 
+%pstack stop
+					{
+						(,) search {
+							exch pop exch
+						}{
+							exit
+						}ifelse
+					
+					
+					}loop
+					counttomark array astore exch pop
+%pstack stop				
+				}{
+					(\\:) search {
+						exch pop
+						mark 3 1 roll
+						exch 
+%pstack stop
+						{
+							(\\:) search {
+								exch pop exch
+							}{
+								exit
+							}ifelse
+						}loop
+						counttomark array astore exch pop
+%pstack stop				
+					}if				
+				}ifelse
+				
+				def
+			}{
+(# no assignment: ) =
+pstack stop			
+			}ifelse
+%currentdict dfa
+%pstack stop	
+			end
+		}{
+			project begin
+			(=) search {
+				exch pop % the assignment
+				cvn exch
+				def
+			}{
+(# no assignment: ) =
+pstack stop
+			}ifelse
+%currentdict dfa
+%pstack stop	
+			end
+		}ifelse
+	
+	}ifelse
+	}{pop}ifelse
+eof{ exit }if
+
+} loop
+
+ifil closefile
+() =
+% at this point we can dump the key value dicts
+
+/clean {
+%	(clean : ) print dup
+%	==
+	[ exch {
+		dup 92 eq {
+			pop 47
+%pstack stop
+		}if
+
+	} forall ] makestring
+% dup ==
+
+} def
+
+/ifil tfm (r) file def
+/eof false def
+10 dict begin
+
+{
+
+	ifil 5000 string readline {}{/eof true def} ifelse
+	dup length 0 gt {
+		dup 0 get 91 eq {
+() =
+			end % prior section
+			dup length 2 sub 1 exch getinterval 
+%dup (new section: ) print =
+			cvn project exch 10 dict begin currentdict put
+%pstack stop
+%(open) =			
+
+		}{
+			(=) search {
+				exch pop % the assignment
+				cvn exch
+				(;) search {
+%dup length ==
+clean
+					exch pop
+					mark 3 1 roll
+					exch 
+%pstack stop
+					{
+						(;) search {
+%dup ==
+%dup length ==
+clean
+							exch pop exch
+
+						}{
+							dup length 0 eq {
+								pop %pstack stop
+							}if
+							exit
+						}ifelse
+					
+					
+					}loop
+					counttomark array astore exch pop
+%pstack stop				
+				}{
+%(no sep: ) print dup =
+%pstack stop				
+				}ifelse
+				def
+			}{
+(no assignment: ) =
+pstack stop			
+			}ifelse
+%(new data: ) =
+%currentdict dfa
+%pstack stop
+		}ifelse
+	}{pop}ifelse
+eof{ exit }if
+
+} loop
+%currentdict dfa
+end
+
+ifil closefile
+
+% system should have these parsed
+%project /PreviousGenFiles get begin
+%	HeaderPath ==
+%	SourcePath
+%	HeaderFiles {=} forall
+%	SourceFiles {=} forall
+%end
+%() =
+%/PreviousLibFiles
+%LibFiles
+
+writeLog {
+	/lf LogFilePath (w) file def
+} if
+
+(\033[0;32m) print 
+(######################################) writef wrtlin
+(# Makefile autogenerated from xstm) writef wrtlin
+(# STM32CubeMx *.ioc and .mxproject) writef wrtlin
+(######################################) writef wrtlin
+() writef wrtlin
+(######################################) writef wrtlin
+(# target) writef wrtlin
+(######################################) writef wrtlin
+(\033[0m) print 
+(TARGET = )  writef project /board get writef wrtlin
+() writef wrtlin
+(\033[0;32m) print 
+(######################################) writef wrtlin
+(# building variables) writef wrtlin
+(######################################) writef wrtlin
+(# debug build?) writef wrtlin
+(\033[0m) print 
+(DEBUG = 1) writef wrtlin
+(\033[0;32m) print 
+(# optimization) writef wrtlin
+(\033[0m) print 
+(OPT = -Os) writef wrtlin
+() writef wrtlin
+(\033[0;32m) print 
+(#######################################) writef wrtlin
+(# pathes) writef wrtlin
+(#######################################) writef wrtlin
+(# source path) writef wrtlin
+(# Build path) writef wrtlin
+(\033[0m) print 
+(BUILD_DIR = Debug) writef wrtlin
+() writef wrtlin
+(\033[0;32m) print 
+(######################################) writef wrtlin
+(# source) writef wrtlin
+(######################################) writef wrtlin
+(\033[0m) print 
+(C_SOURCES = \\) writef wrtlin
+
+%project /PreviousUsedRideFiles get begin
+%project /PreviousGenFiles get begin
+project /PreviousUsedTStudioFiles get begin
+%project /PreviousLibFiles get begin
+%/SourceFiles
+%/HeaderFiles
+
+	SourceFiles {
+%LibFiles {
+		(../) anchorsearch
+		{
+			pop 
+			dup mark exch (.c) search {
+				cleartomark
+				(  ) writef writef ( \\) writef wrtlin
+			}{
+				% should be assembly
+				%cleartomark
+				asmlist {} forall
+				counttomark array astore exch pop
+				exch pop
+				currentdict end
+				exch
+				/asmlist exch def
+				begin
+%pstack stop
+				
+
+			}ifelse
+		}{ 
+			dup mark exch (.c) search {
+				cleartomark
+				(  ) writef writef ( \\) writef wrtlin
+			}{
+				%cleartomark
+				dup mark exch (.s) search {
+%pstack stop
+					cleartomark
+					% should be assembly
+					asmlist {} forall
+					counttomark array astore exch pop
+					exch pop
+					currentdict end
+					exch
+					/asmlist exch def
+					begin
+				}{
+					%cleartomark
+					dup mark exch (.h) search {
+%pstack stop
+						cleartomark %mark exch
+						%pstack stop
+						hdrlist{} forall
+						counttomark array astore exch pop
+						exch pop
+						currentdict end
+						exch
+						/hdrlist exch def
+						begin
+					}{
+% udefined file type
+pstack stop
+					}ifelse
+				}ifelse	
+
+			}ifelse
+		}ifelse
+		
+	
+	} forall
+	
+(  ../../cores/mapleMX/itoa.c \\) writef wrtlin
+(  ../../cores/mapleMX/syscalls.c \\) writef wrtlin
+(  ../../cores/mapleMX/wiring_digital.c \\) writef wrtlin
+(  ../../cores/mapleMX/wiring_shift.c \\) writef wrtlin
+(  ../../cores/mapleMX/wiring.c \\) writef wrtlin
+(  ../../cores/mapleMX/avr/dtostrf.c) writef wrtlin
+wrtlin
+(CPP_SOURCES = \\) writef wrtlin
+(  ../../cores/mapleMX/new.cpp \\) writef wrtlin
+(  ../../cores/mapleMX/Print.cpp \\) writef wrtlin
+(  ../../cores/mapleMX/RingBuffer.cpp \\) writef wrtlin
+(  ../../cores/mapleMX/UARTClass.cpp \\) writef wrtlin
+(  ../../cores/mapleMX/USARTClass.cpp \\) writef wrtlin
+(  ../../cores/mapleMX/WMath.cpp \\) writef wrtlin
+(  ../../cores/mapleMX/WString.cpp \\) writef wrtlin
+(  ./variant.cpp \\) writef wrtlin
+(  /Users/Arethusa/Documents/Arduino_extra/munge/sketch.cpp) writef wrtlin
+wrtlin 
+(ASM_SOURCES = ) writef wrtlin
+%(  Drivers/CMSIS/Device/ST/STM32F1xx/Source/Templates/gcc/startup_stm32f103xb.s
+asmlist {(ASM_SOURCES += ) writef writef wrtlin} forall
+end
+wrtlin
+(\033[0;32m) print 
+(#######################################) writef wrtlin
+(# binaries) writef wrtlin
+(#######################################) writef wrtlin
+(\033[0m) print
+(CPP = arm-none-eabi-g++) writef wrtlin
+(CC = arm-none-eabi-gcc) writef wrtlin
+(AS = arm-none-eabi-gcc  -c -g -x assembler-with-cpp) writef wrtlin
+(CP = arm-none-eabi-objcopy) writef wrtlin
+(AR = arm-none-eabi-ar) writef wrtlin
+(SZ = arm-none-eabi-size) writef wrtlin
+(HEX = $\(CP\) -O ihex) writef wrtlin
+(BIN = $\(CP\) -O binary -S) writef wrtlin
+wrtlin
+(\033[0;32m) print 
+(#######################################) writef wrtlin
+(# CFLAGS )writef wrtlin
+(#######################################) writef wrtlin
+(# macros for gcc )writef wrtlin
+(\033[0m) print
+(AS_DEFS = )writef wrtlin  %-DSTM32_MEDIUM_DENSITY)
+(C_DEFS = ) writef wrtlin %-DUSE_HAL_DRIVER -DSTM32F103xE -DSTM32_MEDIUM_DENSITY  -DBOARD_NUCLEO_F103RE -D__STM32F1__ -DF_CPU=84000000L) writef wrtlin
+(\033[0;32m) print 
+(# includes for gcc) writef wrtlin
+(\033[0m) print
+(AS_INCLUDES = ) writef wrtlin
+(C_INCLUDES = -IInc) writef wrtlin
+%C_INCLUDES += -IInc
+%C_INCLUDES += -IDrivers/STM32F1xx_HAL_Driver/Inc
+%C_INCLUDES += -IDrivers/STM32F1xx_HAL_Driver/Inc/Legacy
+%C_INCLUDES += -IDrivers/CMSIS/Include
+%C_INCLUDES += -IInc
+%C_INCLUDES += -IDrivers/CMSIS/Device/ST/STM32F1xx/Include
+%C_INCLUDES += -IMiddlewares/ST/STM32_USB_Device_Library/Core/Inc
+%C_INCLUDES += -IMiddlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc
+%C_INCLUDES += -IInc
+%C_INCLUDES += -IInc
+%C_INCLUDES += -IDrivers/STM32F1xx_HAL_Driver/Inc
+%C_INCLUDES += -IDrivers/STM32F1xx_HAL_Driver/Inc/Legacy
+%C_INCLUDES += -IDrivers/CMSIS/Include
+%C_INCLUDES += -IInc
+%C_INCLUDES += -IDrivers/CMSIS/Device/ST/STM32F1xx/Include
+%C_INCLUDES += -IMiddlewares/ST/STM32_USB_Device_Library/Core/Inc
+%C_INCLUDES += -IMiddlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc
+%C_INCLUDES += -I./
+%C_INCLUDES += -I../../cores/mapleMX
+%C_INCLUDES += -I../../cores/mapleMX/avr
+%C_INCLUDES += -I../../cores/mapleMX/usb
+
+
+project /PreviousUsedTStudioFiles get begin
+%project /PreviousUsedRideFiles get begin
+%HeaderFiles {
+	HeaderPath {
+	(C_INCLUDES += -I) writef
+	writef wrtlin
+	} forall
+
+end
+(C_INCLUDES += -I./)  writef wrtlin
+(C_INCLUDES += -I../../cores/mapleMX) writef wrtlin
+(C_INCLUDES += -I../../cores/mapleMX/avr) writef wrtlin
+(C_INCLUDES += -I../../cores/mapleMX/usb) writef wrtlin
+
+(CPP_INCLUDES = -IInc) writef wrtlin
+project /PreviousUsedTStudioFiles get begin
+%/HeaderFiles
+	HeaderPath {
+	(CPP_INCLUDES += -I) writef
+	writef wrtlin
+	} forall
+end
+(CPP_INCLUDES += -I./)  writef wrtlin
+(C_INCLUDES += -I../../cores/mapleMX) writef wrtlin
+(CPP_INCLUDES += -I../../cores/mapleMX/avr) writef wrtlin
+(CPP_INCLUDES += -I../../cores/mapleMX/usb) writef wrtlin
+
+
+wrtlin
+(\033[0;32m) print 
+(# compile gcc flags) writef wrtlin
+(\033[0m) print
+
+(ASFLAGS =  -MMD -fdata-sections -ffunction-sections -mcpu=cortex-m3 -DF_CPU=) writef project /RCC get /SYSCLKFreq_VALUE get writef (L -DARDUINO=10604 -mthumb) writef wrtlin
+(ASFLAGS += -#DARDUINO_ARCH_HALMX -D) writef project /Mcu get /UserName get writef ( -D) writef
+project /Mcu get /Family get writef ( -D__) writef project /Mcu get /Family get writef (__ $\(AS_INCLUDES\)) writef wrtlin
+
+(CFLAGS = -g -Os -w -DDEBUG_LEVEL=DEBUG_NONE -MMD -ffunction-sections -fdata-sections -nostdlib --param max-inline-insns-single=500) writef wrtlin
+(CFLAGS += -DBOARD_) writef project /board get writef ( -mcpu=cortex-m3 -DF_CPU=) writef 
+project /RCC get /SYSCLKFreq_VALUE get writef (L -DARDUINO=10604 -mthumb) writef wrtlin
+(CFLAGS += -#DARDUINO_ARCH_HALMX -D) writef project /Mcu get /UserName get writef ( -D) writef 
+project /Mcu get /Family get writef ( -D__) writef project /Mcu get /Family get writef (__ $\(C_INCLUDES\)) writef
+wrtlin
+
+(ifeq \($\(DEBUG\), 1\)) writef wrtlin
+(CFLAGS += -g -gdwarf-2) writef wrtlin
+(endif) writef wrtlin
+(\033[0;32m) print 
+(# Generate dependency information) writef wrtlin
+(\033[0m) print
+(CFLAGS += -MD -MP -MF .dep/$(@F).d) writef wrtlin
+
+
+(CPPFLAGS = -g -Os -w -DDEBUG_LEVEL=DEBUG_NONE -MMD -ffunction-sections -fdata-sections -nostdlib --param max-inline-insns-single=500) writef wrtlin
+(CPPFLAGS += -DBOARD_) writef project /board get writef ( -mcpu=cortex-m3 -DF_CPU=) writef 
+project /RCC get /SYSCLKFreq_VALUE get writef (L -DARDUINO=10604 -mthumb) writef wrtlin
+(CPPFLAGS += -#DARDUINO_ARCH_HALMX -D) writef project /Mcu get /UserName get writef ( -D) writef 
+project /Mcu get /Family get writef ( -D__) writef project /Mcu get /Family get writef (__ $\(CPP_INCLUDES\)) writef wrtlin
+(ifeq \($\(DEBUG\), 1\)) writef wrtlin
+(CPPFLAGS += -g -gdwarf-2) writef wrtlin
+(endif) writef wrtlin
+(\033[0;32m) print 
+(# Generate dependency information) writef wrtlin
+(\033[0m) print
+(CPPFLAGS += -MD -MP -MF .dep/$(@F).d) writef wrtlin
+wrtlin
+(\033[0;32m) print 
+(#######################################) writef wrtlin
+(# LDFLAGS) writef wrtlin
+(#######################################) writef wrtlin
+(# link script) writef wrtlin
+(#-Map=$\(BUILD_DIR\)/$\(TARGET\).map,--cref -Wl,--gc-sections)  writef wrtlin
+(\033[0m) print
+(LDSCRIPT = ) writef 
+
+%(SW4STM32/MXNucleoF103/STM32F103RBTx_FLASH.ld) writef wrtlin
+project /ProjectManager get begin
+TargetToolchain writef (/) writef
+ProjectName writef (/) writef
+DeviceId writef (_FLASH.ld) writef wrtlin
+end
+
+(\033[0;32m) print 
+(# libraries) writef wrtlin
+(\033[0m) print
+(LIBS = -lc -lm -lnosys) writef wrtlin
+(LIBDIR =) writef wrtlin
+(LDFLAGS = -Os -Wl,--gc-sections -mcpu=cortex-m4 -T$\(LDSCRIPT\) -Wl,-Map=$\(BUILD_DIR\)/$\(TARGET\).map,) writef wrtlin
+(LDFLAGS += -L/Users/Arethusa/Documents/Arduino/hardware/HALMX_Arduino_STM32/HALMX/variants/MXNucleoF103/ld) writef wrtlin 
+(LDFLAGS += -lm -lgcc -mthumb -Wl,--cref -Wl,--check-sections -Wl,--gc-sections -Wl,--unresolved-symbols=report-all -Wl,--warn-common) writef wrtlin 
+(LDFLAGS +=  -Wl,--warn-section-align -Wl,--warn-unresolved-symbols) writef wrtlin 
+wrtlin wrtlin
+(\033[0;32m) print 
+(# default action: build all) writef wrtlin
+(\033[0m) print
+(all: $\(BUILD_DIR\)/$\(TARGET\).elf $\(BUILD_DIR\)/$\(TARGET\).hex $\(BUILD_DIR\)/$\(TARGET\).bin) writef wrtlin
+wrtlin
+
+(\033[0;32m) print 
+(#######################################) writef wrtlin
+(# build the application) writef wrtlin
+(#######################################) writef wrtlin
+(# list of objects) writef wrtlin
+(\033[0m) print
+(OBJECTS = $\(addprefix $\(BUILD_DIR\)/,$\(notdir $\(C_SOURCES:.c=.o\)\)\)) writef wrtlin
+(vpath %.c $\(sort $\(dir $\(C_SOURCES\)\)\)) writef wrtlin
+(\033[0;32m) print 
+(#) writef wrtlin
+(\033[0m) print
+(OBJECTS += $\(addprefix $\(BUILD_DIR\)/,$\(notdir $\(CPP_SOURCES:.cpp=.o\)\)\)) writef wrtlin
+(vpath %.cpp $\(sort $\(dir $\(CPP_SOURCES\)\)\)) writef wrtlin
+(\033[0;32m) print 
+(# list of ASM program objects) writef wrtlin
+(\033[0m) print
+(OBJECTS += $\(addprefix $\(BUILD_DIR\)/,$\(notdir $\(ASM_SOURCES:.s=.o\)\)\)) writef wrtlin
+(vpath %.s $\(sort $\(dir $\(ASM_SOURCES\)\)\)) writef wrtlin
+wrtlin
+($\(BUILD_DIR\)/%.o: %.cpp Makefile | $\(BUILD_DIR\)) writef wrtlin
+(	$\(CPP\) -c $\(CPPFLAGS\)  -Wa,-a,-ad,-alms=$\(BUILD_DIR\)/$\(notdir $\(<:.cpp=.lst\)\) $< -o $@) writef wrtlin
+wrtlin
+($\(BUILD_DIR\)/%.o: %.c Makefile | $\(BUILD_DIR\)) writef wrtlin
+(	$\(CC\) -c $\(CFLAGS\) -Wa,-a,-ad,-alms=$\(BUILD_DIR\)/$\(notdir $\(<:.c=.lst\)\) $< -o $@) writef wrtlin
+wrtlin
+($\(BUILD_DIR\)/%.o: %.s Makefile | $\(BUILD_DIR\)) writef wrtlin
+(	$\(AS\) -c $\(ASFLAGS\) $< -o $@) writef wrtlin
+wrtlin
+($\(BUILD_DIR\)/$\(TARGET\).elf: $\(OBJECTS\) Makefile) writef wrtlin
+(	$\(CPP\) $\(OBJECTS\) $\(LDFLAGS\) -o $@) writef wrtlin
+(	$\(SZ\) $@) writef wrtlin
+wrtlin
+($\(BUILD_DIR\)/%.hex: $\(BUILD_DIR\)/%.elf | $\(BUILD_DIR\)) writef wrtlin
+(	$\(HEX\) $< $@) writef wrtlin
+wrtlin
+($\(BUILD_DIR\)/%.bin: $\(BUILD_DIR\)/%.elf | $\(BUILD_DIR\)) writef wrtlin
+(	$\(BIN\) $< $@	) writef wrtlin
+wrtlin
+($\(BUILD_DIR\):) writef wrtlin
+(	mkdir -p $@		) writef wrtlin
+wrtlin
+(\033[0;32m) print 
+(#######################################) writef wrtlin
+(# clean up) writef wrtlin
+(#######################################) writef wrtlin
+(\033[0m) print
+(clean:) writef wrtlin
+(	-rm -fR .dep $\(BUILD_DIR\)) writef wrtlin
+wrtlin
+(\033[0;32m) print 
+(#######################################) writef wrtlin
+(# dependencies) writef wrtlin
+(#######################################) writef wrtlin
+(\033[0m) print
+(-include $\(shell mkdir .dep 2>/dev/null\) $\(wildcard .dep/*\)) writef wrtlin
+wrtlin
+(\033[0;32m) print 
+(# *** EOF ***) writef wrtlin
+(\033[0m) print
+
+writeLog {
+	lf closefile
+} if
+
+
+%project dfa
+
+%/thisMcu project /Mcu get def
+%/pincount thisMcu /PinsNb get cvi def
+
+% extract the pins in order
+
+%0 1 pincount 1 sub {
+%	/thispin exch def
+%	thispin =string cvs print ( ) print
+%	thisMcu (Pin) thispin 3 string cvs strcat cvn get dup print
+%	cvn project exch get dfa	
+%} for
+
+
